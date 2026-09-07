@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthGuard } from './auth.guard';
 import { UsersModule } from 'src/users/users.module';
 import { JwtModule } from '@nestjs/jwt/dist/jwt.module';
 
@@ -20,7 +21,7 @@ function parseExpiresIn(value: string): number {
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [JwtModule],
+  providers: [AuthService, AuthGuard],
+  exports: [AuthService, JwtModule, AuthGuard],
 })
 export class AuthModule {}

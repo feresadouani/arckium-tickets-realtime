@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
@@ -6,6 +6,8 @@ import { UsersService } from 'src/users/users.service';
 import { SignInDto } from './dto/signin.dto';
 import { UserRole, Users } from 'src/users/users.entity';
 import { RegisterDto } from './dto/register.dto';
+import { SetupAdminDto } from './dto/setup-admin.dto';
+import { isPasswordHashed } from 'src/common/password.util';
 
 function parseExpiresIn(value: string): number {
     const match = value.match(/^(\d+)([smhd])?$/);
@@ -16,6 +18,17 @@ function parseExpiresIn(value: string): number {
     return n * (multipliers[unit] ?? 1);
 }
 
+function cookieOptions() {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const expiresInSec = parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d');
+    return {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: (isProduction ? 'strict' : 'lax') as 'strict' | 'lax',
+        path: '/',
+        maxAge: expiresInSec * 1000,
+    };
+}
 
 @Injectable()
 export class AuthService {
@@ -25,75 +38,113 @@ export class AuthService {
     ) { }
 
     async validateUser(email: string, password: string): Promise<{ status: boolean, payload?: Users, message?: string } | null> {
-        const user = await this.userService.findByEmail(email);
-        if (user && await bcrypt.compare(password, user.password)) {
-            return { "status": true, "payload": user };
-        } else {
-            return { "status": false, "message": "Invalid email or password!" };
+        const normalizedEmail = email.trim().toLowerCase();
+        const user = await this.userService.findByEmail(normalizedEmail);
+        if (!user) {
+            return { status: false, message: 'Invalid email or password' };
         }
+
+        if (user.active === false) {
+            return { status: false, message: 'Account disabled. Contact an administrator.' };
+        }
+
+        let isValid = false;
+
+        if (isPasswordHashed(user.password)) {
+            isValid = await bcrypt.compare(password, user.password);
+        } else if (user.password === password) {
+            // Migration legacy uniquement
+            isValid = true;
+            await this.userService.hashAndSavePassword(user, password);
+        }
+
+        if (isValid) {
+            return { status: true, payload: user };
+        }
+
+        return { status: false, message: 'Invalid email or password' };
+    }
+
+    private async issueToken(user: Users, res: Response, statusCode = 200, extra: Record<string, unknown> = {}) {
+        const payload = { sub: String(user._id), email: user.email, role: user.role };
+        const secret = process.env.JWT_SECRET || 'default-secret-change-in-production';
+        const expiresInSec = parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d');
+        const access_token = await this.jwtService.signAsync(payload, {
+            expiresIn: expiresInSec,
+            secret,
+        });
+        res.cookie('access_token', access_token, cookieOptions());
+        const { message, ...rest } = extra;
+        res.status(statusCode).send({
+            message: message ?? 'Login successful',
+            ...rest,
+        });
     }
 
     async login(authDto: SignInDto, res: Response) {
         const user = await this.validateUser(authDto.email, authDto.password);
         if (!user || !user.status || !user.payload) {
-            res.status(401).send(user?.message ?? 'Invalid credentials');
+            res.status(401).send(user?.message ?? 'Identifiants invalides');
             return;
         }
-        const payload = { sub: String(user.payload._id), email: user.payload.email, role: user.payload.role };
-        const secret = process.env.JWT_SECRET;
-        const expiresInSec = parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d');
-        const access_token = await this.jwtService.signAsync(payload, {
-            expiresIn: expiresInSec,
-            secret,
-        });
-        const isProduction = process.env.NODE_ENV === 'production';
-        res.cookie('access_token', access_token, {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: isProduction ? 'strict' : 'lax',
-        });
-        res.status(200).send({ message: 'Login successful!', token: access_token });
+        await this.issueToken(user.payload, res, 200, { message: 'Login successful' });
     }
 
-    async register(registerDto: RegisterDto, res: Response) {
-        const existing = await this.userService.findByEmail(registerDto.email);
-        if (existing) {
-            throw new ConflictException('Un compte existe déjà avec cet email.');
+    async getSetupStatus(): Promise<{ needsSetup: boolean }> {
+        const count = await this.userService.countUsers();
+        return { needsSetup: count === 0 };
+    }
+
+    async setupAdmin(setupDto: SetupAdminDto, res: Response) {
+        const count = await this.userService.countUsers();
+        if (count > 0) {
+            throw new ConflictException('The application is already set up. Please sign in.');
         }
-        const hashedPassword = await bcrypt.hash(registerDto.password, 10);
+
         const user = await this.userService.create({
-            firstname: registerDto.firstname,
-            lastname: registerDto.lastname,
-            email: registerDto.email,
-            password: hashedPassword,
+            firstname: setupDto.firstname,
+            lastname: setupDto.lastname,
+            email: setupDto.email.toLowerCase(),
+            password: setupDto.password,
             active: true,
-            role: UserRole.technicien,
+            role: UserRole.admin,
         });
-        const payload = { sub: String(user._id), email: user.email, role: user.role };
-        const secret = process.env.JWT_SECRET;
-        const expiresInSec = parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d');
-        const access_token = await this.jwtService.signAsync(payload, {
-            expiresIn: expiresInSec,
-            secret,
+
+        await this.issueToken(user, res, 201, {
+            message: 'Administrator created successfully',
+            userId: String(user._id),
         });
-        const isProduction = process.env.NODE_ENV === 'production';
-        res.cookie('access_token', access_token, {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: isProduction ? 'strict' : 'lax',
-        });
-        res.status(201).send({ message: 'Inscription réussie !', userId: String(user._id) });
+    }
+
+    async register(_registerDto: RegisterDto, _res: Response) {
+        const count = await this.userService.countUsers();
+        if (count === 0) {
+            throw new ForbiddenException(
+                'Set up the administrator first via POST /auth/setup',
+            );
+        }
+        throw new ForbiddenException(
+            'Public registration is disabled. Contact an administrator.',
+        );
     }
 
     async getProfile(userId: string) {
         const user = await this.userService.findById(userId);
         if (!user) return null;
+        if (user.active === false) {
+            throw new UnauthorizedException('Account disabled');
+        }
         const { password, ...profile } = user;
         return profile;
     }
 
     async logout(res: Response) {
-        res.clearCookie('access_token');
-        res.status(200).send({ message: 'Déconnexion réussie' });
+        res.clearCookie('access_token', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+            path: '/',
+        });
+        res.status(200).send({ message: 'Logout successful' });
     }
 }

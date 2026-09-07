@@ -2,9 +2,11 @@ import { ObjectId } from "mongodb";
 import { Column, Entity, ObjectIdColumn } from "typeorm";
 
 export enum UserRole {
-    operateur = 'operateur',
+    admin = 'admin',
+    responsable = 'responsable',
     technicien = 'technicien',
-    responsable = 'responsable'
+    /** @deprecated conservé pour compatibilité base existante */
+    operateur = 'operateur',
 }
 
 @Entity('users')

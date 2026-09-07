@@ -1,20 +1,28 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEmpty, IsNotEmpty, IsString, ValidateIf } from 'class-validator';
+import { IsStrongPassword } from 'src/common/validators/is-strong-password.decorator';
 
 export class RegisterDto {
   @IsString()
-  @IsNotEmpty({ message: 'Le prénom est requis' })
+  @IsNotEmpty({ message: 'First name is required' })
   firstname!: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'Le nom est requis' })
+  @IsNotEmpty({ message: 'Last name is required' })
   lastname!: string;
 
-  @IsEmail()
+  @IsEmail({}, { message: 'Invalid email' })
   @IsNotEmpty()
   email!: string;
 
   @IsString()
-  @IsNotEmpty()
-  @MinLength(6, { message: 'Le mot de passe doit contenir au moins 6 caractères' })
+  @IsNotEmpty({ message: 'Password is required' })
+  @IsStrongPassword()
   password!: string;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEmpty({
+    message:
+      'Role cannot be set via /auth/register. Use POST /users/add (as administrator).',
+  })
+  role?: string;
 }
