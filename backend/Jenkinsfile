@@ -1,223 +1,577 @@
+```groovy
 // =============================================================================
-// Arckium Tickets — Backend CI/CD (NestJS + MongoDB)
-// =============================================================================
-// Job Jenkins : Pipeline from SCM → Script Path = backend/Jenkinsfile
-// Prérequis :
-//   - Plugin NodeJS (outil NodeJS-20)
-//   - Plugin Docker Pipeline
-//   - Credentials : docker-registry-creds, ssh-deploy-key
+// Arckium Tickets — Backend CI/CD
+// NestJS + MongoDB
+//
+// Jenkins Job:
+//   Pipeline from SCM
+//   Script Path = backend/Jenkinsfile
+//
+// Environnement Jenkins:
+//   - Node.js installé sur la VM
+//   - npm installé sur la VM
+//   - Docker installé sur la VM
+//   - Docker Compose installé sur la VM
+//
+// Node.js n'est PAS géré par le plugin NodeJS.
+// Jenkins utilise directement Node.js disponible dans son PATH.
+//
+// Credentials Jenkins:
+//   - docker-registry-creds
+//   - ssh-deploy-key
 // =============================================================================
 
 pipeline {
-  agent any
 
-  options {
-    timestamps()
-    disableConcurrentBuilds()
-    buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
-    timeout(time: 30, unit: 'MINUTES')
-  }
+    agent any
 
-  parameters {
-    choice(
-      name: 'DEPLOY_ENV',
-      choices: ['none', 'staging', 'production'],
-      description: 'Environnement de déploiement (none = CI uniquement)'
-    )
-    booleanParam(
-      name: 'SKIP_TESTS',
-      defaultValue: false,
-      description: 'Ignorer les tests unitaires'
-    )
-    booleanParam(
-      name: 'SKIP_DOCKER',
-      defaultValue: false,
-      description: 'Ignorer le build / push Docker'
-    )
-    string(
-      name: 'IMAGE_TAG',
-      defaultValue: '',
-      description: 'Tag Docker personnalisé (vide = BUILD_NUMBER + git SHA)'
-    )
-  }
+    // =========================================================================
+    // OPTIONS
+    // =========================================================================
 
-  environment {
-    NODE_VERSION       = 'NodeJS-20'
-    DOCKER_REGISTRY    = 'docker.io'
-    DOCKER_NAMESPACE   = 'arckium'
-    IMAGE_NAME         = "${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/tickets-backend"
-    DOCKER_CREDENTIALS = 'docker-registry-creds'
-    SSH_CREDENTIALS    = 'ssh-deploy-key'
-    STAGING_HOST       = 'staging.arckium.local'
-    PROD_HOST          = 'prod.arckium.local'
-    DEPLOY_USER        = 'deploy'
-    DEPLOY_PATH        = '/opt/arckium-tickets'
-    PROJECT_DIR        = 'backend'
-  }
+    options {
 
-  tools {
-    nodejs "${NODE_VERSION}"
-  }
+        timestamps()
 
-  stages {
+        disableConcurrentBuilds()
 
-    stage('Checkout') {
-      steps {
-        checkout scm
-        script {
-          env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-          env.EFFECTIVE_TAG = params.IMAGE_TAG?.trim()
-            ? params.IMAGE_TAG.trim()
-            : "${env.BUILD_NUMBER}-${env.GIT_SHA}"
-          echo "Backend | commit ${env.GIT_SHA} | tag ${env.EFFECTIVE_TAG}"
-        }
-      }
-    }
-
-    stage('Install') {
-      steps {
-        dir("${PROJECT_DIR}") {
-          sh 'npm ci'
-        }
-      }
-    }
-
-    stage('Lint') {
-      steps {
-        dir("${PROJECT_DIR}") {
-          sh 'npm run lint'
-        }
-      }
-    }
-
-    stage('Test') {
-      when {
-        expression { return !params.SKIP_TESTS }
-      }
-      steps {
-        dir("${PROJECT_DIR}") {
-          sh 'npm run test -- --passWithNoTests --ci --coverage'
-        }
-      }
-      post {
-        always {
-          dir("${PROJECT_DIR}") {
-            junit allowEmptyResults: true, testResults: '**/junit.xml'
-            publishHTML([
-              allowMissing: true,
-              alwaysLinkToLastBuild: true,
-              keepAll: true,
-              reportDir: 'coverage/lcov-report',
-              reportFiles: 'index.html',
-              reportName: 'Backend Coverage'
-            ])
-          }
-        }
-      }
-    }
-
-    stage('Build') {
-      steps {
-        dir("${PROJECT_DIR}") {
-          sh 'npm run build'
-        }
-      }
-      post {
-        success {
-          archiveArtifacts artifacts: 'backend/dist/**', fingerprint: true, allowEmptyArchive: true
-        }
-      }
-    }
-
-    stage('Security audit') {
-      steps {
-        dir("${PROJECT_DIR}") {
-          sh 'npm audit --audit-level=high || true'
-        }
-      }
-    }
-
-    stage('Docker Build & Push') {
-      when {
-        allOf {
-          expression { return !params.SKIP_DOCKER }
-          anyOf {
-            branch 'main'
-            branch 'master'
-            branch 'develop'
-            expression { return params.DEPLOY_ENV != 'none' }
-          }
-        }
-      }
-      steps {
-        script {
-          docker.withRegistry("https://${DOCKER_REGISTRY}", DOCKER_CREDENTIALS) {
-            def img = docker.build(
-              "${IMAGE_NAME}:${EFFECTIVE_TAG}",
-              "-f ${PROJECT_DIR}/Dockerfile ${PROJECT_DIR}"
+        buildDiscarder(
+            logRotator(
+                numToKeepStr: '20',
+                artifactNumToKeepStr: '10'
             )
-            img.push()
-            img.push('latest')
-          }
-        }
-      }
+        )
+
+        timeout(
+            time: 30,
+            unit: 'MINUTES'
+        )
     }
 
-    stage('Deploy Staging') {
-      when {
-        expression { return params.DEPLOY_ENV == 'staging' }
-      }
-      steps {
-        lock(resource: 'arckium-backend-staging') {
-          sshagent(credentials: [SSH_CREDENTIALS]) {
-            sh """
-              ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${STAGING_HOST} '
-                set -e
-                cd ${DEPLOY_PATH}
-                export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
-                docker compose pull backend
-                docker compose up -d --remove-orphans backend
-                docker compose ps backend
-              '
+    // =========================================================================
+    // PARAMETERS
+    // =========================================================================
+
+    parameters {
+
+        choice(
+            name: 'DEPLOY_ENV',
+            choices: [
+                'none',
+                'staging',
+                'production'
+            ],
+            description: 'Environnement de déploiement. none = CI uniquement'
+        )
+
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Ignorer les tests unitaires'
+        )
+
+        booleanParam(
+            name: 'SKIP_DOCKER',
+            defaultValue: false,
+            description: 'Ignorer le build et le push Docker'
+        )
+
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: '',
+            description: 'Tag Docker personnalisé. Vide = BUILD_NUMBER + Git SHA'
+        )
+    }
+
+    // =========================================================================
+    // ENVIRONMENT
+    // =========================================================================
+
+    environment {
+
+        // ---------------------------------------------------------------------
+        // Docker
+        // ---------------------------------------------------------------------
+
+        DOCKER_REGISTRY = 'docker.io'
+
+        DOCKER_NAMESPACE = 'arckium'
+
+        IMAGE_NAME = "${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/tickets-backend"
+
+        DOCKER_CREDENTIALS = 'docker-registry-creds'
+
+        // ---------------------------------------------------------------------
+        // SSH
+        // ---------------------------------------------------------------------
+
+        SSH_CREDENTIALS = 'ssh-deploy-key'
+
+        // ---------------------------------------------------------------------
+        // Deployment
+        // ---------------------------------------------------------------------
+
+        STAGING_HOST = 'staging.arckium.local'
+
+        PROD_HOST = 'prod.arckium.local'
+
+        DEPLOY_USER = 'deploy'
+
+        DEPLOY_PATH = '/opt/arckium-tickets'
+
+        // ---------------------------------------------------------------------
+        // Project
+        // ---------------------------------------------------------------------
+
+        PROJECT_DIR = 'backend'
+    }
+
+    // =========================================================================
+    // STAGES
+    // =========================================================================
+
+    stages {
+
+        // =====================================================================
+        // Environment
+        // =====================================================================
+
+        stage('Environment') {
+
+            steps {
+
+                sh '''
+                    echo "=========================================="
+                    echo "Environment"
+                    echo "=========================================="
+
+                    echo ""
+                    echo "Node.js:"
+                    node --version
+
+                    echo ""
+                    echo "npm:"
+                    npm --version
+
+                    echo ""
+                    echo "Docker:"
+                    docker --version
+
+                    echo ""
+                    echo "Docker Compose:"
+                    docker compose version
+
+                    echo ""
+                    echo "Jenkins user:"
+                    whoami
+
+                    echo ""
+                    echo "Workspace:"
+                    pwd
+
+                    echo ""
+                    echo "=========================================="
+                '''
+            }
+        }
+
+        // =====================================================================
+        // Checkout
+        // =====================================================================
+
+        stage('Checkout') {
+
+            steps {
+
+                checkout scm
+
+                script {
+
+                    env.GIT_SHA = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    env.EFFECTIVE_TAG = params.IMAGE_TAG?.trim()
+                        ? params.IMAGE_TAG.trim()
+                        : "${env.BUILD_NUMBER}-${env.GIT_SHA}"
+
+                    echo "=========================================="
+                    echo "Backend build"
+                    echo "=========================================="
+                    echo "Git SHA      : ${env.GIT_SHA}"
+                    echo "Docker tag   : ${env.EFFECTIVE_TAG}"
+                    echo "Deploy env   : ${params.DEPLOY_ENV}"
+                    echo "=========================================="
+                }
+            }
+        }
+
+        // =====================================================================
+        // Install
+        // =====================================================================
+
+        stage('Install') {
+
+            steps {
+
+                dir("${PROJECT_DIR}") {
+
+                    sh '''
+                        echo "Installing backend dependencies..."
+
+                        npm ci
+                    '''
+                }
+            }
+        }
+
+        // =====================================================================
+        // Lint
+        // =====================================================================
+
+        stage('Lint') {
+
+            steps {
+
+                dir("${PROJECT_DIR}") {
+
+                    sh '''
+                        echo "Running ESLint..."
+
+                        npm run lint
+                    '''
+                }
+            }
+        }
+
+        // =====================================================================
+        // Test
+        // =====================================================================
+
+        stage('Test') {
+
+            when {
+
+                expression {
+                    return !params.SKIP_TESTS
+                }
+            }
+
+            steps {
+
+                dir("${PROJECT_DIR}") {
+
+                    sh '''
+                        echo "Running NestJS tests..."
+
+                        npm run test -- \
+                            --passWithNoTests \
+                            --ci \
+                            --coverage
+                    '''
+                }
+            }
+
+            post {
+
+                always {
+
+                    dir("${PROJECT_DIR}") {
+
+                        junit(
+                            allowEmptyResults: true,
+                            testResults: '**/junit.xml'
+                        )
+
+                        publishHTML(
+                            target: [
+                                allowMissing: true,
+                                alwaysLinkToLastBuild: true,
+                                keepAll: true,
+                                reportDir: 'coverage/lcov-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Backend Coverage'
+                            ]
+                        )
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Build
+        // =====================================================================
+
+        stage('Build') {
+
+            steps {
+
+                dir("${PROJECT_DIR}") {
+
+                    sh '''
+                        echo "Building NestJS application..."
+
+                        npm run build
+                    '''
+                }
+            }
+
+            post {
+
+                success {
+
+                    archiveArtifacts(
+                        artifacts: 'backend/dist/**',
+                        fingerprint: true,
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
+
+        // =====================================================================
+        // Security Audit
+        // =====================================================================
+
+        stage('Security Audit') {
+
+            steps {
+
+                dir("${PROJECT_DIR}") {
+
+                    sh '''
+                        echo "Running npm security audit..."
+
+                        npm audit --audit-level=high || true
+                    '''
+                }
+            }
+        }
+
+        // =====================================================================
+        // Docker Build & Push
+        // =====================================================================
+
+        stage('Docker Build & Push') {
+
+            when {
+
+                allOf {
+
+                    expression {
+                        return !params.SKIP_DOCKER
+                    }
+
+                    anyOf {
+
+                        branch 'main'
+
+                        branch 'master'
+
+                        branch 'develop'
+
+                        expression {
+                            return params.DEPLOY_ENV != 'none'
+                        }
+                    }
+                }
+            }
+
+            steps {
+
+                script {
+
+                    echo "=========================================="
+                    echo "Docker Build"
+                    echo "=========================================="
+
+                    def image = docker.build(
+                        "${IMAGE_NAME}:${EFFECTIVE_TAG}",
+                        "-f ${PROJECT_DIR}/Dockerfile ${PROJECT_DIR}"
+                    )
+
+                    echo "Docker image built:"
+                    echo "${IMAGE_NAME}:${EFFECTIVE_TAG}"
+
+                    echo "=========================================="
+                    echo "Docker Push"
+                    echo "=========================================="
+
+                    docker.withRegistry(
+                        "https://${DOCKER_REGISTRY}",
+                        DOCKER_CREDENTIALS
+                    ) {
+
+                        echo "Pushing versioned image..."
+
+                        image.push()
+
+                        echo "Pushing latest image..."
+
+                        image.push('latest')
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Deploy Staging
+        // =====================================================================
+
+        stage('Deploy Staging') {
+
+            when {
+
+                expression {
+                    return params.DEPLOY_ENV == 'staging'
+                }
+            }
+
+            steps {
+
+                lock(
+                    resource: 'arckium-backend-staging'
+                ) {
+
+                    sshagent(
+                        credentials: [
+                            SSH_CREDENTIALS
+                        ]
+                    ) {
+
+                        sh """
+                            ssh -o StrictHostKeyChecking=no \
+                                ${DEPLOY_USER}@${STAGING_HOST} '
+                                    set -e
+
+                                    echo "======================================"
+                                    echo "Deploying backend to STAGING"
+                                    echo "======================================"
+
+                                    cd ${DEPLOY_PATH}
+
+                                    export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+
+                                    echo "Backend image:"
+                                    echo \$BACKEND_IMAGE
+
+                                    docker compose pull backend
+
+                                    docker compose up -d \
+                                        --remove-orphans \
+                                        backend
+
+                                    echo "Backend status:"
+
+                                    docker compose ps backend
+                                '
+                        """
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Deploy Production
+        // =====================================================================
+
+        stage('Deploy Production') {
+
+            when {
+
+                expression {
+                    return params.DEPLOY_ENV == 'production'
+                }
+            }
+
+            steps {
+
+                input(
+                    message: "Deploy backend ${EFFECTIVE_TAG} to PRODUCTION?",
+                    ok: 'Deploy'
+                )
+
+                lock(
+                    resource: 'arckium-backend-production'
+                ) {
+
+                    sshagent(
+                        credentials: [
+                            SSH_CREDENTIALS
+                        ]
+                    ) {
+
+                        sh """
+                            ssh -o StrictHostKeyChecking=no \
+                                ${DEPLOY_USER}@${PROD_HOST} '
+                                    set -e
+
+                                    echo "======================================"
+                                    echo "Deploying backend to PRODUCTION"
+                                    echo "======================================"
+
+                                    cd ${DEPLOY_PATH}
+
+                                    export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+
+                                    echo "Backend image:"
+                                    echo \$BACKEND_IMAGE
+
+                                    docker compose pull backend
+
+                                    docker compose up -d \
+                                        --remove-orphans \
+                                        backend
+
+                                    echo "Backend status:"
+
+                                    docker compose ps backend
+                                '
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // POST ACTIONS
+    // =========================================================================
+
+    post {
+
+        success {
+
+            echo """
+            ==========================================
+            Backend pipeline SUCCESS
+            ==========================================
+
+            Git SHA    : ${env.GIT_SHA}
+            Docker tag : ${env.EFFECTIVE_TAG}
+            Deploy env : ${params.DEPLOY_ENV}
+
+            ==========================================
             """
-          }
         }
-      }
-    }
 
-    stage('Deploy Production') {
-      when {
-        expression { return params.DEPLOY_ENV == 'production' }
-      }
-      steps {
-        input message: "Deploy backend ${EFFECTIVE_TAG} to PRODUCTION?", ok: 'Deploy'
-        lock(resource: 'arckium-backend-production') {
-          sshagent(credentials: [SSH_CREDENTIALS]) {
-            sh """
-              ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${PROD_HOST} '
-                set -e
-                cd ${DEPLOY_PATH}
-                export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
-                docker compose pull backend
-                docker compose up -d --remove-orphans backend
-                docker compose ps backend
-              '
+        failure {
+
+            echo """
+            ==========================================
+            Backend pipeline FAILED
+            ==========================================
             """
-          }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo "Backend pipeline OK — tag ${env.EFFECTIVE_TAG} | deploy=${params.DEPLOY_ENV}"
+        always {
+
+            cleanWs(
+                deleteDirs: true,
+                notFailBuild: true
+            )
+        }
     }
-    failure {
-      echo "Backend pipeline FAILED"
-    }
-    always {
-      cleanWs(deleteDirs: true, notFailBuild: true)
-    }
-  }
 }
+```
