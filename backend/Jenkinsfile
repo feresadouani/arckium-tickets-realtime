@@ -85,6 +85,24 @@ pipeline {
             defaultValue: '',
             description: 'Tag Docker personnalisé. Vide = BUILD_NUMBER + Git SHA'
         )
+
+        string(
+            name: 'DEPLOY_HOST',
+            defaultValue: '192.168.56.10',
+            description: 'IP ou hostname du serveur de déploiement (SSH)'
+        )
+
+        string(
+            name: 'DEPLOY_USER',
+            defaultValue: 'deploy',
+            description: 'Utilisateur SSH sur le serveur de déploiement'
+        )
+
+        string(
+            name: 'DEPLOY_PATH',
+            defaultValue: '/opt/arckium-tickets',
+            description: 'Chemin docker-compose sur le serveur'
+        )
     }
 
     // =========================================================================
@@ -112,16 +130,16 @@ pipeline {
         SSH_CREDENTIALS = 'ssh-deploy-key'
 
         // ---------------------------------------------------------------------
-        // Deployment
+        // Deployment (hôtes résolus via paramètres — pas de DNS fantôme)
         // ---------------------------------------------------------------------
 
-        STAGING_HOST = 'staging.arckium.local'
+        STAGING_HOST = "${params.DEPLOY_HOST}"
 
-        PROD_HOST = 'prod.arckium.local'
+        PROD_HOST = "${params.DEPLOY_HOST}"
 
-        DEPLOY_USER = 'deploy'
+        DEPLOY_USER = "${params.DEPLOY_USER}"
 
-        DEPLOY_PATH = '/opt/arckium-tickets'
+        DEPLOY_PATH = "${params.DEPLOY_PATH}"
 
         // ---------------------------------------------------------------------
         // Project
