@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Response } from 'express';
+import { CookieOptions, Response } from 'express';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from 'src/users/users.service';
 import { SignInDto } from './dto/signin.dto';
@@ -27,7 +27,7 @@ function parseExpiresIn(value: string): number {
   return n * (multipliers[unit] ?? 1);
 }
 
-function cookieOptions() {
+function cookieOptions(): CookieOptions {
   const isProduction = process.env.NODE_ENV === 'production';
   const expiresInSec = parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d');
   return {
