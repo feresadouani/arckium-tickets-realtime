@@ -94,7 +94,7 @@ pipeline {
 
         DOCKER_REGISTRY = 'docker.io'
 
-        DOCKER_NAMESPACE = 'arckium'
+        DOCKER_NAMESPACE = 'feresadouani10'
 
         IMAGE_NAME = "${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/tickets-backend"
 
