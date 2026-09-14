@@ -320,7 +320,7 @@ pipeline {
 
                             npx --yes sonarqube-scanner \\
                                 -Dsonar.host.url=${SONAR_HOST_URL} \\
-                                -Dsonar.token=\$SONAR_TOKEN \\
+                                -Dsonar.login=\$SONAR_TOKEN \\
                                 -Dsonar.projectKey=${SONAR_PROJECT_KEY} \\
                                 -Dsonar.sources=src \\
                                 -Dsonar.tests=src \\
