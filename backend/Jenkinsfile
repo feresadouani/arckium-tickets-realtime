@@ -283,15 +283,12 @@ pipeline {
                             testResults: '**/junit.xml'
                         )
 
-                        publishHTML(
-                            target: [
-                                allowMissing: true,
-                                alwaysLinkToLastBuild: true,
-                                keepAll: true,
-                                reportDir: 'coverage/lcov-report',
-                                reportFiles: 'index.html',
-                                reportName: 'Backend Coverage'
-                            ]
+                        // HTML Publisher plugin not required —
+                        // archive the coverage report as a build artifact instead
+                        archiveArtifacts(
+                            artifacts: 'coverage/**',
+                            fingerprint: true,
+                            allowEmptyArchive: true
                         )
                     }
                 }
@@ -379,37 +376,43 @@ pipeline {
 
             steps {
 
-                script {
-
-                    echo "=========================================="
-                    echo "Docker Build"
-                    echo "=========================================="
-
-                    def image = docker.build(
-                        "${IMAGE_NAME}:${EFFECTIVE_TAG}",
-                        "-f ${PROJECT_DIR}/Dockerfile ${PROJECT_DIR}"
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS}",
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
                     )
+                ]) {
 
-                    echo "Docker image built:"
-                    echo "${IMAGE_NAME}:${EFFECTIVE_TAG}"
+                    sh """
+                        set -e
 
-                    echo "=========================================="
-                    echo "Docker Push"
-                    echo "=========================================="
+                        echo "=========================================="
+                        echo "Docker Build"
+                        echo "=========================================="
 
-                    docker.withRegistry(
-                        "https://${DOCKER_REGISTRY}",
-                        DOCKER_CREDENTIALS
-                    ) {
+                        docker build \\
+                            -t ${IMAGE_NAME}:${EFFECTIVE_TAG} \\
+                            -t ${IMAGE_NAME}:latest \\
+                            -f ${PROJECT_DIR}/Dockerfile \\
+                            ${PROJECT_DIR}
 
-                        echo "Pushing versioned image..."
+                        echo "Built: ${IMAGE_NAME}:${EFFECTIVE_TAG}"
 
-                        image.push()
+                        echo "=========================================="
+                        echo "Docker Push"
+                        echo "=========================================="
 
-                        echo "Pushing latest image..."
+                        echo "\$DOCKER_PASS" | docker login \\
+                            -u "\$DOCKER_USER" \\
+                            --password-stdin \\
+                            ${DOCKER_REGISTRY}
 
-                        image.push('latest')
-                    }
+                        docker push ${IMAGE_NAME}:${EFFECTIVE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+
+                        docker logout ${DOCKER_REGISTRY} || true
+                    """
                 }
             }
         }
@@ -429,44 +432,42 @@ pipeline {
 
             steps {
 
-                lock(
-                    resource: 'arckium-backend-staging'
-                ) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIALS}",
+                        keyFileVariable: 'SSH_KEY'
+                    )
+                ]) {
 
-                    sshagent(
-                        credentials: [
-                            SSH_CREDENTIALS
-                        ]
-                    ) {
+                    sh """
+                        set -e
 
-                        sh """
-                            ssh -o StrictHostKeyChecking=no \
-                                ${DEPLOY_USER}@${STAGING_HOST} '
-                                    set -e
+                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
+                            ${DEPLOY_USER}@${STAGING_HOST} '
+                                set -e
 
-                                    echo "======================================"
-                                    echo "Deploying backend to STAGING"
-                                    echo "======================================"
+                                echo "======================================"
+                                echo "Deploying backend to STAGING"
+                                echo "======================================"
 
-                                    cd ${DEPLOY_PATH}
+                                cd ${DEPLOY_PATH}
 
-                                    export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                                export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
 
-                                    echo "Backend image:"
-                                    echo \$BACKEND_IMAGE
+                                echo "Backend image:"
+                                echo \$BACKEND_IMAGE
 
-                                    docker compose pull backend
+                                docker compose pull backend
 
-                                    docker compose up -d \
-                                        --remove-orphans \
-                                        backend
+                                docker compose up -d \\
+                                    --remove-orphans \\
+                                    backend
 
-                                    echo "Backend status:"
+                                echo "Backend status:"
 
-                                    docker compose ps backend
-                                '
-                        """
-                    }
+                                docker compose ps backend
+                            '
+                    """
                 }
             }
         }
@@ -491,44 +492,42 @@ pipeline {
                     ok: 'Deploy'
                 )
 
-                lock(
-                    resource: 'arckium-backend-production'
-                ) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIALS}",
+                        keyFileVariable: 'SSH_KEY'
+                    )
+                ]) {
 
-                    sshagent(
-                        credentials: [
-                            SSH_CREDENTIALS
-                        ]
-                    ) {
+                    sh """
+                        set -e
 
-                        sh """
-                            ssh -o StrictHostKeyChecking=no \
-                                ${DEPLOY_USER}@${PROD_HOST} '
-                                    set -e
+                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
+                            ${DEPLOY_USER}@${PROD_HOST} '
+                                set -e
 
-                                    echo "======================================"
-                                    echo "Deploying backend to PRODUCTION"
-                                    echo "======================================"
+                                echo "======================================"
+                                echo "Deploying backend to PRODUCTION"
+                                echo "======================================"
 
-                                    cd ${DEPLOY_PATH}
+                                cd ${DEPLOY_PATH}
 
-                                    export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                                export BACKEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
 
-                                    echo "Backend image:"
-                                    echo \$BACKEND_IMAGE
+                                echo "Backend image:"
+                                echo \$BACKEND_IMAGE
 
-                                    docker compose pull backend
+                                docker compose pull backend
 
-                                    docker compose up -d \
-                                        --remove-orphans \
-                                        backend
+                                docker compose up -d \\
+                                    --remove-orphans \\
+                                    backend
 
-                                    echo "Backend status:"
+                                echo "Backend status:"
 
-                                    docker compose ps backend
-                                '
-                        """
-                    }
+                                docker compose ps backend
+                            '
+                    """
                 }
             }
         }

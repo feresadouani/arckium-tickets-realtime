@@ -344,30 +344,41 @@ pipeline {
 
             steps {
 
-                script {
-
-                    echo "Building Docker image..."
-
-                    def image = docker.build(
-                        "${IMAGE_NAME}:${EFFECTIVE_TAG}",
-                        "--build-arg VITE_API_URL=${params.VITE_API_URL} -f ${PROJECT_DIR}/Dockerfile ${PROJECT_DIR}"
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS}",
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
                     )
+                ]) {
 
-                    echo "Logging into Docker Registry..."
+                    sh """
+                        set -e
 
-                    docker.withRegistry(
-                        "https://${DOCKER_REGISTRY}",
-                        DOCKER_CREDENTIALS
-                    ) {
+                        echo "Building Docker image..."
+
+                        docker build \\
+                            --build-arg VITE_API_URL=${params.VITE_API_URL} \\
+                            -t ${IMAGE_NAME}:${EFFECTIVE_TAG} \\
+                            -t ${IMAGE_NAME}:latest \\
+                            -f ${PROJECT_DIR}/Dockerfile \\
+                            ${PROJECT_DIR}
+
+                        echo "Logging into Docker Registry..."
+
+                        echo "\$DOCKER_PASS" | docker login \\
+                            -u "\$DOCKER_USER" \\
+                            --password-stdin \\
+                            ${DOCKER_REGISTRY}
 
                         echo "Pushing image: ${IMAGE_NAME}:${EFFECTIVE_TAG}"
-
-                        image.push()
+                        docker push ${IMAGE_NAME}:${EFFECTIVE_TAG}
 
                         echo "Pushing latest tag..."
+                        docker push ${IMAGE_NAME}:latest
 
-                        image.push('latest')
-                    }
+                        docker logout ${DOCKER_REGISTRY} || true
+                    """
                 }
             }
         }
@@ -387,40 +398,38 @@ pipeline {
 
             steps {
 
-                lock(
-                    resource: 'arckium-frontend-staging'
-                ) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIALS}",
+                        keyFileVariable: 'SSH_KEY'
+                    )
+                ]) {
 
-                    sshagent(
-                        credentials: [
-                            SSH_CREDENTIALS
-                        ]
-                    ) {
+                    sh """
+                        set -e
 
-                        sh """
-                            ssh -o StrictHostKeyChecking=no \
-                                ${DEPLOY_USER}@${STAGING_HOST} '
-                                    set -e
+                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
+                            ${DEPLOY_USER}@${STAGING_HOST} '
+                                set -e
 
-                                    echo "Deploying frontend..."
+                                echo "Deploying frontend..."
 
-                                    cd ${DEPLOY_PATH}
+                                cd ${DEPLOY_PATH}
 
-                                    export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
 
-                                    echo "Pulling image:"
-                                    echo \$FRONTEND_IMAGE
+                                echo "Pulling image:"
+                                echo \$FRONTEND_IMAGE
 
-                                    docker compose pull frontend
+                                docker compose pull frontend
 
-                                    docker compose up -d \
-                                        --remove-orphans \
-                                        frontend
+                                docker compose up -d \\
+                                    --remove-orphans \\
+                                    frontend
 
-                                    docker compose ps frontend
-                                '
-                        """
-                    }
+                                docker compose ps frontend
+                            '
+                    """
                 }
             }
         }
@@ -445,40 +454,38 @@ pipeline {
                     ok: 'Deploy'
                 )
 
-                lock(
-                    resource: 'arckium-frontend-production'
-                ) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIALS}",
+                        keyFileVariable: 'SSH_KEY'
+                    )
+                ]) {
 
-                    sshagent(
-                        credentials: [
-                            SSH_CREDENTIALS
-                        ]
-                    ) {
+                    sh """
+                        set -e
 
-                        sh """
-                            ssh -o StrictHostKeyChecking=no \
-                                ${DEPLOY_USER}@${PROD_HOST} '
-                                    set -e
+                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
+                            ${DEPLOY_USER}@${PROD_HOST} '
+                                set -e
 
-                                    echo "Deploying frontend..."
+                                echo "Deploying frontend..."
 
-                                    cd ${DEPLOY_PATH}
+                                cd ${DEPLOY_PATH}
 
-                                    export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
 
-                                    echo "Pulling image:"
-                                    echo \$FRONTEND_IMAGE
+                                echo "Pulling image:"
+                                echo \$FRONTEND_IMAGE
 
-                                    docker compose pull frontend
+                                docker compose pull frontend
 
-                                    docker compose up -d \
-                                        --remove-orphans \
-                                        frontend
+                                docker compose up -d \\
+                                    --remove-orphans \\
+                                    frontend
 
-                                    docker compose ps frontend
-                                '
-                        """
-                    }
+                                docker compose ps frontend
+                            '
+                    """
                 }
             }
         }

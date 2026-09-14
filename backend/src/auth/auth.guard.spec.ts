@@ -1,7 +1,13 @@
+import { JwtService } from '@nestjs/jwt';
+import { Reflector } from '@nestjs/core';
 import { AuthGuard } from './auth.guard';
 
 describe('AuthGuard', () => {
   it('should be defined', () => {
-    expect(new AuthGuard()).toBeDefined();
+    const guard = new AuthGuard(
+      { verifyAsync: jest.fn() } as unknown as JwtService,
+      new Reflector(),
+    );
+    expect(guard).toBeDefined();
   });
 });
