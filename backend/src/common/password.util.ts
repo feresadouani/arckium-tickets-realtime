@@ -17,7 +17,9 @@ export async function hashPassword(plainPassword: string): Promise<string> {
   return bcrypt.hash(plainPassword, 10);
 }
 
-export function validatePasswordStrength(password: string): PasswordValidationResult {
+export function validatePasswordStrength(
+  password: string,
+): PasswordValidationResult {
   const errors: string[] = [];
 
   if (!password || password.length < PASSWORD_MIN_LENGTH) {

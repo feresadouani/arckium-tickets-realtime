@@ -1,39 +1,54 @@
-import { Injectable, InternalServerErrorException, NotFoundException, OnModuleInit, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  OnModuleInit,
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users, UserRole } from './users.entity';
 import { MongoRepository } from 'typeorm';
 import { ObjectId } from 'mongodb';
-import { hashPassword, isPasswordHashed, validatePasswordStrength } from 'src/common/password.util';
+import {
+  hashPassword,
+  isPasswordHashed,
+  validatePasswordStrength,
+} from 'src/common/password.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import { canAssignRole } from 'src/common/roles.util';
 
 @Injectable()
 export class UsersService implements OnModuleInit {
-    constructor(@InjectRepository(Users) private readonly userRepository:MongoRepository<Users>){}
+  constructor(
+    @InjectRepository(Users)
+    private readonly userRepository: MongoRepository<Users>,
+  ) {}
 
-    async onModuleInit() {
-        await this.migratePlainTextPasswords();
-    }
+  async onModuleInit() {
+    await this.migratePlainTextPasswords();
+  }
 
-    private async migratePlainTextPasswords(): Promise<void> {
-        try {
-            const users = await this.userRepository.find();
-            for (const user of users) {
-                if (user.password && !isPasswordHashed(user.password)) {
-                    user.password = await hashPassword(user.password);
-                    await this.userRepository.save(user);
-                }
-            }
-        } catch (error) {
-            console.error('Erreur lors de la migration des mots de passe:', error);
+  private async migratePlainTextPasswords(): Promise<void> {
+    try {
+      const users = await this.userRepository.find();
+      for (const user of users) {
+        if (user.password && !isPasswordHashed(user.password)) {
+          user.password = await hashPassword(user.password);
+          await this.userRepository.save(user);
         }
+      }
+    } catch (error) {
+      console.error('Erreur lors de la migration des mots de passe:', error);
     }
+  }
 
-    async hashAndSavePassword(user: Users, plainPassword: string): Promise<void> {
-        user.password = await hashPassword(plainPassword);
-        await this.userRepository.save(user);
-    }
+  async hashAndSavePassword(user: Users, plainPassword: string): Promise<void> {
+    user.password = await hashPassword(plainPassword);
+    await this.userRepository.save(user);
+  }
 
   async countUsers(): Promise<number> {
     return this.userRepository.count();
@@ -42,7 +57,11 @@ export class UsersService implements OnModuleInit {
   async findAll(): Promise<Partial<Users>[]> {
     try {
       const users = await this.userRepository.find();
-      return users.map(({ password, ...safe }) => safe);
+      return users.map((user) => {
+        const { password: _password, ...safe } = user;
+        void _password;
+        return safe;
+      });
     } catch (error) {
       console.error(error);
       throw new InternalServerErrorException('Erreur');
@@ -52,7 +71,7 @@ export class UsersService implements OnModuleInit {
     try {
       const user = await this.findById(id);
       if (!user) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
       const validation = validatePasswordStrength(newPassword);
       if (!validation.valid) {
@@ -61,75 +80,80 @@ export class UsersService implements OnModuleInit {
       const hashedPassword = await hashPassword(newPassword);
       user.password = hashedPassword;
       await this.userRepository.save(user);
-      return { message: "Password updated successfully" };
+      return { message: 'Password updated successfully' };
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      throw new InternalServerErrorException("Error updating password");
+      throw new InternalServerErrorException('Error updating password');
     }
   }
   async disableUser(id: string) {
     try {
       const user = await this.findById(id);
       if (!user) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
       user.active = false;
       await this.userRepository.save(user);
-      return { message: "User disabled successfully" };
+      return { message: 'User disabled successfully' };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException("Error disabling user");
+      throw new InternalServerErrorException('Error disabling user');
     }
   }
   async enableUser(id: string) {
     try {
       const user = await this.findById(id);
       if (!user) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
       user.active = true;
       await this.userRepository.save(user);
-      return { message: "User enabled successfully" };
+      return { message: 'User enabled successfully' };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException("Error enabling user");
+      throw new InternalServerErrorException('Error enabling user');
     }
   }
   async deleteUser(id: string) {
     try {
       const user = await this.findById(id);
       if (!user) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
       await this.userRepository.delete({ _id: new ObjectId(id) });
-      return { message: "User deleted successfully" };
+      return { message: 'User deleted successfully' };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException("Error deleting user");
+      throw new InternalServerErrorException('Error deleting user');
     }
   }
   async updateProfile(id: string, profile: UpdateUserProfileDto) {
     try {
       const user = await this.findById(id);
       if (!user) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
       Object.assign(user, profile);
       if (user.password && !isPasswordHashed(user.password)) {
         user.password = await hashPassword(user.password);
       }
       await this.userRepository.save(user);
-      return { message: "Profile updated successfully" };
+      return { message: 'Profile updated successfully' };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException("Error updating profile");
+      throw new InternalServerErrorException('Error updating profile');
     }
   }
 
   async findByEmail(email: string): Promise<Users | null> {
-    return this.userRepository.findOne({ where: { email: email.trim().toLowerCase() } });
+    return this.userRepository.findOne({
+      where: { email: email.trim().toLowerCase() },
+    });
   }
 
   async findById(id: string): Promise<Users | null> {

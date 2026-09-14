@@ -8,7 +8,7 @@ import { SignInDto } from './dto/signin.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   @Public()
   @Get('setup/status')
@@ -30,12 +30,16 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  async register(@Body() registerDto: RegisterDto, @Res() res: Response) {
-    return this.authService.register(registerDto, res);
+  async register(@Body() registerDto: RegisterDto) {
+    void registerDto;
+    return this.authService.register();
   }
 
   @Get('me')
-  async me(@Req() req: Request & { user?: { sub?: string } }, @Res() res: Response) {
+  async me(
+    @Req() req: Request & { user?: { sub?: string } },
+    @Res() res: Response,
+  ) {
     const sub = req.user?.sub;
     if (!sub) return res.status(401).send({ message: 'Unauthenticated' });
     const profile = await this.authService.getProfile(sub);
@@ -45,7 +49,7 @@ export class AuthController {
 
   @Public()
   @Post('logout')
-  async logout(@Res() res: Response) {
+  logout(@Res() res: Response) {
     return this.authService.logout(res);
   }
 }

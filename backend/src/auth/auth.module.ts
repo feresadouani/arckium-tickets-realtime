@@ -10,14 +10,22 @@ function parseExpiresIn(value: string): number {
   if (!match) return 86400;
   const n = parseInt(match[1], 10);
   const unit = match[2] || 's';
-  const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  const multipliers: Record<string, number> = {
+    s: 1,
+    m: 60,
+    h: 3600,
+    d: 86400,
+  };
   return n * (multipliers[unit] ?? 1);
 }
 @Module({
-  imports: [UsersModule,
+  imports: [
+    UsersModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'default-secret-change-in-production',
-      signOptions: { expiresIn: parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d') },
+      signOptions: {
+        expiresIn: parseExpiresIn(process.env.JWT_EXPIRESIN ?? '1d'),
+      },
     }),
   ],
   controllers: [AuthController],

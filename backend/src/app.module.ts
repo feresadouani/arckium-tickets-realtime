@@ -13,7 +13,6 @@ import { EquipmentsModule } from './equipments/equipments.module';
 import { Equipment } from './equipments/equipments.entity';
 import { NotificationsModule } from './notifications/notifications.module';
 
-
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -43,4 +42,4 @@ import { NotificationsModule } from './notifications/notifications.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

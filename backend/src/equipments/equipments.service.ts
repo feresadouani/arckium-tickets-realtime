@@ -34,6 +34,9 @@ export class EquipmentsService {
   }
 
   async findById(id: string): Promise<Equipment | null> {
-    return this.equipmentRepository.findOneBy({ _id: new ObjectId(id), active: true });
+    return this.equipmentRepository.findOneBy({
+      _id: new ObjectId(id),
+      active: true,
+    });
   }
 }

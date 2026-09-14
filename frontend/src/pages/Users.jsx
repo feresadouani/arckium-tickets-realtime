@@ -41,7 +41,19 @@ export default function Users() {
   }, [])
 
   useEffect(() => {
-    fetchUsers()
+    let cancelled = false
+
+    async function loadUsers() {
+      // Yield so setState is not synchronous inside the effect body
+      await Promise.resolve()
+      if (cancelled) return
+      await fetchUsers()
+    }
+
+    void loadUsers()
+    return () => {
+      cancelled = true
+    }
   }, [fetchUsers])
 
   const handleEnable = async (id) => {

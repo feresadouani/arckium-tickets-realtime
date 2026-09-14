@@ -58,7 +58,9 @@ export class TicketsController {
   ): Promise<Ticket[]> {
     const tickets = await this.ticketsService.findAll();
     if (req.user?.role === UserRole.technicien) {
-      return tickets.filter((t) => String(t.technicien_id) === String(req.user?.sub));
+      return tickets.filter(
+        (t) => String(t.technicien_id) === String(req.user?.sub),
+      );
     }
     return tickets;
   }
@@ -74,7 +76,9 @@ export class TicketsController {
 
     if (role === UserRole.technicien) {
       if (String(existing.technicien_id) !== String(req.user?.sub)) {
-        throw new ForbiddenException('You can only update your assigned tickets');
+        throw new ForbiddenException(
+          'You can only update your assigned tickets',
+        );
       }
       // Technicien : statut seulement
       const allowed: TicketBodyDto = {};
@@ -108,7 +112,9 @@ export class TicketsController {
       req.user.role === UserRole.technicien &&
       String(existing.technicien_id) !== String(req.user.sub)
     ) {
-      throw new ForbiddenException('You can only comment on your assigned tickets');
+      throw new ForbiddenException(
+        'You can only comment on your assigned tickets',
+      );
     }
 
     const profile = await this.usersService.findById(req.user.sub);

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useTickets } from '../context/TicketContext'
 import { useAuth } from '../context/AuthContext'
@@ -57,9 +57,13 @@ export default function TicketList() {
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
+    setPage(1)
   }
 
-  const clearFilters = () => setFilters(INITIAL_FILTERS)
+  const clearFilters = () => {
+    setFilters(INITIAL_FILTERS)
+    setPage(1)
+  }
 
   const hasActiveFilters = Object.entries(filters).some(([key, value]) => {
     if (key === 'search') return value.trim() !== ''
@@ -117,10 +121,6 @@ export default function TicketList() {
       )
     })
   }, [visibleTickets, filters, getEquipmentName, getTechnicianName])
-
-  useEffect(() => {
-    setPage(1)
-  }, [filters])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)

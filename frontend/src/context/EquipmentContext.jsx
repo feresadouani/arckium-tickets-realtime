@@ -37,10 +37,23 @@ export function EquipmentProvider({ children }) {
   }, [])
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchEquipments()
-    } else {
-      setEquipments([])
+    let cancelled = false
+
+    async function syncEquipments() {
+      // Yield so setState is not synchronous inside the effect body
+      await Promise.resolve()
+      if (cancelled) return
+
+      if (!isAuthenticated) {
+        setEquipments([])
+        return
+      }
+      await fetchEquipments()
+    }
+
+    void syncEquipments()
+    return () => {
+      cancelled = true
     }
   }, [isAuthenticated, fetchEquipments])
 

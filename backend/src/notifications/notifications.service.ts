@@ -8,7 +8,11 @@ import {
 export class NotificationsService {
   constructor(private readonly gateway: NotificationsGateway) {}
 
-  notify(notification: Omit<RealtimeNotification, 'timestamp'> & { timestamp?: string }) {
+  notify(
+    notification: Omit<RealtimeNotification, 'timestamp'> & {
+      timestamp?: string;
+    },
+  ) {
     this.gateway.emitNotification({
       ...notification,
       timestamp: notification.timestamp ?? new Date().toISOString(),
@@ -17,13 +21,15 @@ export class NotificationsService {
 
   notifyTicketCreated(numero: string, titre: string, urgence: string) {
     this.notify({
-      type: urgence === 'elevee' || urgence === 'critical' ? 'critical' : 'update',
+      type:
+        urgence === 'elevee' || urgence === 'critical' ? 'critical' : 'update',
       title: 'New ticket',
       message: `${numero} — ${titre}`,
       targetRole: 'responsable',
     });
     this.notify({
-      type: urgence === 'elevee' || urgence === 'critical' ? 'critical' : 'update',
+      type:
+        urgence === 'elevee' || urgence === 'critical' ? 'critical' : 'update',
       title: 'New ticket',
       message: `${numero} — ${titre}`,
       targetRole: 'admin',
@@ -54,12 +60,7 @@ export class NotificationsService {
     });
   }
 
-  notifyComment(
-    numero: string,
-    titre: string,
-    authorName: string,
-    authorId?: string,
-  ) {
+  notifyComment(numero: string, titre: string, authorName: string) {
     this.notify({
       type: 'comment',
       title: 'New comment',

@@ -16,7 +16,10 @@ export function canManageUsers(role?: UserRole): boolean {
   return role === UserRole.admin;
 }
 
-export function canAssignRole(creatorRole: UserRole, targetRole: UserRole): boolean {
+export function canAssignRole(
+  creatorRole: UserRole,
+  targetRole: UserRole,
+): boolean {
   if (creatorRole === UserRole.admin) {
     return CREATABLE_BY_ADMIN.includes(targetRole);
   }

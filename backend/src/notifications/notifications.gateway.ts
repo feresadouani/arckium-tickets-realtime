@@ -44,12 +44,12 @@ export class NotificationsGateway
     @MessageBody() data: { userId?: string; role?: string },
   ) {
     if (data?.userId) {
-      client.join(`user:${data.userId}`);
+      void client.join(`user:${data.userId}`);
     }
     if (data?.role) {
-      client.join(`role:${data.role}`);
+      void client.join(`role:${data.role}`);
     }
-    client.join('all');
+    void client.join('all');
     return { ok: true };
   }
 

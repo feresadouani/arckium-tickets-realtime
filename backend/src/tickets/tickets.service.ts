@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Ticket, statut } from './tickets.entity';
 import { MongoRepository } from 'typeorm';
@@ -8,7 +12,8 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 @Injectable()
 export class TicketsService {
   constructor(
-    @InjectRepository(Ticket) private readonly TicketRepository: MongoRepository<Ticket>,
+    @InjectRepository(Ticket)
+    private readonly TicketRepository: MongoRepository<Ticket>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -65,7 +70,9 @@ export class TicketsService {
 
   async findById(id: string): Promise<Ticket> {
     try {
-      const ticket = await this.TicketRepository.findOneBy({ _id: new ObjectId(id) });
+      const ticket = await this.TicketRepository.findOneBy({
+        _id: new ObjectId(id),
+      });
       if (!ticket) {
         throw new NotFoundException('Ticket not found');
       }
@@ -122,7 +129,10 @@ export class TicketsService {
       }
 
       if (updates.status && updates.status !== previousStatus) {
-        if (updates.status === statut.resolu || updates.status === statut.cloture) {
+        if (
+          updates.status === statut.resolu ||
+          updates.status === statut.cloture
+        ) {
           ticket.date_resolution = now;
         }
         ticket.history = [
@@ -198,7 +208,6 @@ export class TicketsService {
       saved.numero_ticket,
       saved.titre,
       data.user_name,
-      data.user_id,
     );
 
     return saved;

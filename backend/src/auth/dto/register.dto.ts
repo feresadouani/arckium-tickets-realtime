@@ -1,4 +1,10 @@
-import { IsEmail, IsEmpty, IsNotEmpty, IsString, ValidateIf } from 'class-validator';
+import {
+  IsEmail,
+  IsEmpty,
+  IsNotEmpty,
+  IsString,
+  ValidateIf,
+} from 'class-validator';
 import { IsStrongPassword } from 'src/common/validators/is-strong-password.decorator';
 
 export class RegisterDto {

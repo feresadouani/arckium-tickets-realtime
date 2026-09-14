@@ -48,10 +48,24 @@ export function TicketProvider({ children }) {
   )
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchTickets()
-    } else {
-      setTickets([])
+    let cancelled = false
+
+    async function syncTickets() {
+      // Yield so setState is not synchronous inside the effect body
+      await Promise.resolve()
+      if (cancelled) return
+
+      if (!isAuthenticated) {
+        setTickets([])
+        setTechnicians([])
+        return
+      }
+      await fetchTickets()
+    }
+
+    void syncTickets()
+    return () => {
+      cancelled = true
     }
   }, [isAuthenticated, fetchTickets])
 
