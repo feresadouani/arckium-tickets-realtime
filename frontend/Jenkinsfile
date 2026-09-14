@@ -6,21 +6,17 @@
 //   Pipeline from SCM
 //   Script Path = frontend/Jenkinsfile
 //
-// Prérequis Jenkins:
-//   - Pipeline
-//   - Git
-//   - Docker Pipeline
-//   - Credentials: docker-registry-creds
-//   - Credentials: ssh-deploy-key (uniquement pour le déploiement)
-//
 // Environnement Jenkins:
 //   - Node.js installé sur la VM
 //   - npm installé sur la VM
 //   - Docker installé sur la VM
 //   - Docker Compose installé sur la VM
+//   - SonarQube accessible (SONAR_HOST_URL)
 //
-// Node.js n'est PAS géré par le plugin NodeJS.
-// Jenkins utilise directement le Node.js disponible dans son PATH.
+// Credentials Jenkins:
+//   - docker-registry-creds
+//   - ssh-deploy-key
+//   - sonar-token (Secret text)
 // =============================================================================
 
 pipeline {
@@ -64,6 +60,18 @@ pipeline {
                 'production'
             ],
             description: 'Environnement de déploiement. none = CI uniquement'
+        )
+
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Ignorer les tests unitaires'
+        )
+
+        booleanParam(
+            name: 'SKIP_SONAR',
+            defaultValue: false,
+            description: 'Ignorer l analyse SonarQube'
         )
 
         booleanParam(
@@ -114,6 +122,11 @@ pipeline {
 
         // Project
         PROJECT_DIR = 'frontend'
+
+        // SonarQube (credential secret text: sonar-token)
+        SONAR_HOST_URL = 'http://192.168.56.10:9000'
+        SONAR_CREDENTIALS = 'sonar-token'
+        SONAR_PROJECT_KEY = 'arckium-tickets-frontend'
     }
 
     // =========================================================================
@@ -241,20 +254,81 @@ pipeline {
 
         stage('Test') {
 
+            when {
+
+                expression {
+                    return !params.SKIP_TESTS
+                }
+            }
+
             steps {
 
                 dir("${PROJECT_DIR}") {
 
                     sh '''
-                        echo "Running frontend tests..."
+                        echo "Running frontend unit tests with coverage..."
 
-                        if npm run | grep -q "test"; then
-                            npm test -- --run
-                        else
-                            echo "No test script configured."
-                            echo "Skipping frontend tests."
-                        fi
+                        npm run test:cov
                     '''
+                }
+            }
+
+            post {
+
+                always {
+
+                    dir("${PROJECT_DIR}") {
+
+                        archiveArtifacts(
+                            artifacts: 'coverage/**',
+                            fingerprint: true,
+                            allowEmptyArchive: true
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // SonarQube Analysis
+        // ---------------------------------------------------------------------
+
+        stage('SonarQube Analysis') {
+
+            when {
+
+                expression {
+                    return !params.SKIP_SONAR
+                }
+            }
+
+            steps {
+
+                withCredentials([
+                    string(
+                        credentialsId: "${SONAR_CREDENTIALS}",
+                        variable: 'SONAR_TOKEN'
+                    )
+                ]) {
+
+                    dir("${PROJECT_DIR}") {
+
+                        sh """
+                            set -e
+
+                            echo "Running SonarQube analysis..."
+
+                            npx --yes sonarqube-scanner \\
+                                -Dsonar.host.url=${SONAR_HOST_URL} \\
+                                -Dsonar.token=\$SONAR_TOKEN \\
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \\
+                                -Dsonar.sources=src \\
+                                -Dsonar.tests=src \\
+                                -Dsonar.test.inclusions=**/*.{test,spec}.{js,jsx} \\
+                                -Dsonar.exclusions=**/*.{test,spec}.{js,jsx},**/main.jsx \\
+                                -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                        """
+                    }
                 }
             }
         }

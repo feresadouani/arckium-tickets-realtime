@@ -10,4 +10,14 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.{test,spec}.{js,jsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'cobertura'],
+      reportsDirectory: './coverage',
+      include: ['src/utils/**/*.{js,jsx}'],
+    },
+  },
 })

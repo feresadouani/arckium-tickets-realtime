@@ -11,13 +11,12 @@
 //   - npm installé sur la VM
 //   - Docker installé sur la VM
 //   - Docker Compose installé sur la VM
-//
-// Node.js n'est PAS géré par le plugin NodeJS.
-// Jenkins utilise directement Node.js disponible dans son PATH.
+//   - SonarQube accessible (SONAR_HOST_URL)
 //
 // Credentials Jenkins:
 //   - docker-registry-creds
 //   - ssh-deploy-key
+//   - sonar-token (Secret text)
 // =============================================================================
 
 pipeline {
@@ -67,6 +66,12 @@ pipeline {
             name: 'SKIP_TESTS',
             defaultValue: false,
             description: 'Ignorer les tests unitaires'
+        )
+
+        booleanParam(
+            name: 'SKIP_SONAR',
+            defaultValue: false,
+            description: 'Ignorer l analyse SonarQube'
         )
 
         booleanParam(
@@ -123,6 +128,14 @@ pipeline {
         // ---------------------------------------------------------------------
 
         PROJECT_DIR = 'backend'
+
+        // ---------------------------------------------------------------------
+        // SonarQube (credential secret text: sonar-token)
+        // ---------------------------------------------------------------------
+
+        SONAR_HOST_URL = 'http://192.168.56.10:9000'
+        SONAR_CREDENTIALS = 'sonar-token'
+        SONAR_PROJECT_KEY = 'arckium-tickets-backend'
     }
 
     // =========================================================================
@@ -262,12 +275,14 @@ pipeline {
                 dir("${PROJECT_DIR}") {
 
                     sh '''
-                        echo "Running NestJS tests..."
+                        echo "Running NestJS unit tests with coverage..."
 
                         npm run test -- \
-                            --passWithNoTests \
                             --ci \
-                            --coverage
+                            --coverage \
+                            --coverageReporters=lcov \
+                            --coverageReporters=text \
+                            --coverageReporters=cobertura
                     '''
                 }
             }
@@ -280,16 +295,59 @@ pipeline {
 
                         junit(
                             allowEmptyResults: true,
-                            testResults: '**/junit.xml'
+                            testResults: 'junit.xml'
                         )
 
-                        // HTML Publisher plugin not required —
-                        // archive the coverage report as a build artifact instead
                         archiveArtifacts(
-                            artifacts: 'coverage/**',
+                            artifacts: 'coverage/**,junit.xml',
                             fingerprint: true,
                             allowEmptyArchive: true
                         )
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // SonarQube Analysis
+        // =====================================================================
+
+        stage('SonarQube Analysis') {
+
+            when {
+
+                expression {
+                    return !params.SKIP_SONAR
+                }
+            }
+
+            steps {
+
+                withCredentials([
+                    string(
+                        credentialsId: "${SONAR_CREDENTIALS}",
+                        variable: 'SONAR_TOKEN'
+                    )
+                ]) {
+
+                    dir("${PROJECT_DIR}") {
+
+                        sh """
+                            set -e
+
+                            echo "Running SonarQube analysis..."
+
+                            npx --yes sonarqube-scanner \\
+                                -Dsonar.host.url=${SONAR_HOST_URL} \\
+                                -Dsonar.token=\$SONAR_TOKEN \\
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \\
+                                -Dsonar.sources=src \\
+                                -Dsonar.tests=src \\
+                                -Dsonar.test.inclusions=**/*.spec.ts \\
+                                -Dsonar.exclusions=**/*.spec.ts,**/main.ts,**/*.module.ts \\
+                                -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                -Dsonar.typescript.lcov.reportPaths=coverage/lcov.info
+                        """
                     }
                 }
             }
