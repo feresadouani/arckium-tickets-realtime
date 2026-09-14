@@ -18,9 +18,13 @@ import { NotificationsModule } from './notifications/notifications.module';
   imports: [
     TypeOrmModule.forRoot({
       type: 'mongodb',
-      host: 'localhost',
-      port: 27017,
-      database: 'tickets',
+      ...(process.env.MONGODB_URI
+        ? { url: process.env.MONGODB_URI }
+        : {
+            host: process.env.MONGO_HOST || 'localhost',
+            port: parseInt(process.env.MONGO_PORT || '27017', 10),
+            database: process.env.MONGO_DATABASE || 'tickets',
+          }),
       entities: [Users, Ticket, Equipment],
       synchronize: true,
     }),

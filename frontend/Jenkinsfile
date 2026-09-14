@@ -1,0 +1,200 @@
+// =============================================================================
+// Arckium Tickets — Frontend CI/CD (React + Vite + Nginx)
+// =============================================================================
+// Job Jenkins : Pipeline from SCM → Script Path = frontend/Jenkinsfile
+// Prérequis :
+//   - Plugin NodeJS (outil NodeJS-20)
+//   - Plugin Docker Pipeline
+//   - Credentials : docker-registry-creds, ssh-deploy-key
+// =============================================================================
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
+    timeout(time: 30, unit: 'MINUTES')
+  }
+
+  parameters {
+    choice(
+      name: 'DEPLOY_ENV',
+      choices: ['none', 'staging', 'production'],
+      description: 'Environnement de déploiement (none = CI uniquement)'
+    )
+    booleanParam(
+      name: 'SKIP_DOCKER',
+      defaultValue: false,
+      description: 'Ignorer le build / push Docker'
+    )
+    string(
+      name: 'IMAGE_TAG',
+      defaultValue: '',
+      description: 'Tag Docker personnalisé (vide = BUILD_NUMBER + git SHA)'
+    )
+    string(
+      name: 'VITE_API_URL',
+      defaultValue: 'http://localhost:3000',
+      description: 'URL de l\'API injectée au build Vite'
+    )
+  }
+
+  environment {
+    NODE_VERSION       = 'NodeJS-20'
+    DOCKER_REGISTRY    = 'docker.io'
+    DOCKER_NAMESPACE   = 'arckium'
+    IMAGE_NAME         = "${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/tickets-frontend"
+    DOCKER_CREDENTIALS = 'docker-registry-creds'
+    SSH_CREDENTIALS    = 'ssh-deploy-key'
+    STAGING_HOST       = 'staging.arckium.local'
+    PROD_HOST          = 'prod.arckium.local'
+    DEPLOY_USER        = 'deploy'
+    DEPLOY_PATH        = '/opt/arckium-tickets'
+    PROJECT_DIR        = 'frontend'
+  }
+
+  tools {
+    nodejs "${NODE_VERSION}"
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.EFFECTIVE_TAG = params.IMAGE_TAG?.trim()
+            ? params.IMAGE_TAG.trim()
+            : "${env.BUILD_NUMBER}-${env.GIT_SHA}"
+          echo "Frontend | commit ${env.GIT_SHA} | tag ${env.EFFECTIVE_TAG}"
+        }
+      }
+    }
+
+    stage('Install') {
+      steps {
+        dir("${PROJECT_DIR}") {
+          sh 'npm ci'
+        }
+      }
+    }
+
+    stage('Lint') {
+      steps {
+        dir("${PROJECT_DIR}") {
+          sh 'npm run lint'
+        }
+      }
+    }
+
+    stage('Build') {
+      steps {
+        dir("${PROJECT_DIR}") {
+          sh """
+            export VITE_API_URL="${params.VITE_API_URL}"
+            npm run build
+          """
+        }
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'frontend/dist/**', fingerprint: true, allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Security audit') {
+      steps {
+        dir("${PROJECT_DIR}") {
+          sh 'npm audit --audit-level=high || true'
+        }
+      }
+    }
+
+    stage('Docker Build & Push') {
+      when {
+        allOf {
+          expression { return !params.SKIP_DOCKER }
+          anyOf {
+            branch 'main'
+            branch 'master'
+            branch 'develop'
+            expression { return params.DEPLOY_ENV != 'none' }
+          }
+        }
+      }
+      steps {
+        script {
+          docker.withRegistry("https://${DOCKER_REGISTRY}", DOCKER_CREDENTIALS) {
+            def img = docker.build(
+              "${IMAGE_NAME}:${EFFECTIVE_TAG}",
+              "--build-arg VITE_API_URL=${params.VITE_API_URL} -f ${PROJECT_DIR}/Dockerfile ${PROJECT_DIR}"
+            )
+            img.push()
+            img.push('latest')
+          }
+        }
+      }
+    }
+
+    stage('Deploy Staging') {
+      when {
+        expression { return params.DEPLOY_ENV == 'staging' }
+      }
+      steps {
+        lock(resource: 'arckium-frontend-staging') {
+          sshagent(credentials: [SSH_CREDENTIALS]) {
+            sh """
+              ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${STAGING_HOST} '
+                set -e
+                cd ${DEPLOY_PATH}
+                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                docker compose pull frontend
+                docker compose up -d --remove-orphans frontend
+                docker compose ps frontend
+              '
+            """
+          }
+        }
+      }
+    }
+
+    stage('Deploy Production') {
+      when {
+        expression { return params.DEPLOY_ENV == 'production' }
+      }
+      steps {
+        input message: "Deploy frontend ${EFFECTIVE_TAG} to PRODUCTION?", ok: 'Deploy'
+        lock(resource: 'arckium-frontend-production') {
+          sshagent(credentials: [SSH_CREDENTIALS]) {
+            sh """
+              ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${PROD_HOST} '
+                set -e
+                cd ${DEPLOY_PATH}
+                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
+                docker compose pull frontend
+                docker compose up -d --remove-orphans frontend
+                docker compose ps frontend
+              '
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Frontend pipeline OK — tag ${env.EFFECTIVE_TAG} | deploy=${params.DEPLOY_ENV}"
+    }
+    failure {
+      echo "Frontend pipeline FAILED"
+    }
+    always {
+      cleanWs(deleteDirs: true, notFailBuild: true)
+    }
+  }
+}
