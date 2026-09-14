@@ -7,16 +7,14 @@
 //   Script Path = frontend/Jenkinsfile
 //
 // Environnement Jenkins:
-//   - Node.js installé sur la VM
-//   - npm installé sur la VM
-//   - Docker installé sur la VM
-//   - Docker Compose installé sur la VM
+//   - Node.js, npm, Docker, Docker Compose sur la VM Jenkins
 //   - SonarQube accessible (SONAR_HOST_URL)
 //
 // Credentials Jenkins:
 //   - docker-registry-creds
-//   - ssh-deploy-key
 //   - sonar-token (Secret text)
+//
+// Déploiement : Docker Compose local sur l'agent Jenkins (pas de SSH)
 // =============================================================================
 
 pipeline {
@@ -52,16 +50,6 @@ pipeline {
 
     parameters {
 
-        choice(
-            name: 'DEPLOY_ENV',
-            choices: [
-                'none',
-                'staging',
-                'production'
-            ],
-            description: 'Environnement de déploiement. none = CI uniquement'
-        )
-
         booleanParam(
             name: 'SKIP_TESTS',
             defaultValue: false,
@@ -77,7 +65,13 @@ pipeline {
         booleanParam(
             name: 'SKIP_DOCKER',
             defaultValue: false,
-            description: 'Ignorer le build et le push Docker'
+            description: 'Ignorer le build / push Docker'
+        )
+
+        booleanParam(
+            name: 'DOCKER_DEPLOY',
+            defaultValue: true,
+            description: 'Deployer via docker compose sur la VM Jenkins'
         )
 
         string(
@@ -88,26 +82,8 @@ pipeline {
 
         string(
             name: 'VITE_API_URL',
-            defaultValue: 'http://192.168.56.10:5000',
+            defaultValue: 'http://192.168.56.10:3000',
             description: 'URL de l API utilisée par React/Vite'
-        )
-
-        string(
-            name: 'DEPLOY_HOST',
-            defaultValue: '192.168.56.10',
-            description: 'IP ou hostname du serveur de déploiement (SSH)'
-        )
-
-        string(
-            name: 'DEPLOY_USER',
-            defaultValue: 'deploy',
-            description: 'Utilisateur SSH sur le serveur de déploiement'
-        )
-
-        string(
-            name: 'DEPLOY_PATH',
-            defaultValue: '/opt/arckium-tickets',
-            description: 'Chemin docker-compose sur le serveur'
         )
     }
 
@@ -117,28 +93,13 @@ pipeline {
 
     environment {
 
-        // Docker
         DOCKER_REGISTRY = 'docker.io'
-
         DOCKER_NAMESPACE = 'feresadouani10'
-
         IMAGE_NAME = "${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/tickets-frontend"
-
         DOCKER_CREDENTIALS = 'docker-registry-creds'
 
-        // SSH deployment
-        SSH_CREDENTIALS = 'ssh-deploy-key'
-
-        // Deployment (hôtes résolus via paramètres — pas de DNS fantôme)
-        STAGING_HOST = "${params.DEPLOY_HOST}"
-        PROD_HOST = "${params.DEPLOY_HOST}"
-        DEPLOY_USER = "${params.DEPLOY_USER}"
-        DEPLOY_PATH = "${params.DEPLOY_PATH}"
-
-        // Project
         PROJECT_DIR = 'frontend'
 
-        // SonarQube (credential secret text: sonar-token)
         SONAR_HOST_URL = 'http://192.168.56.10:9000'
         SONAR_CREDENTIALS = 'sonar-token'
         SONAR_PROJECT_KEY = 'arckium-tickets-frontend'
@@ -217,9 +178,9 @@ pipeline {
                     echo "=========================================="
                     echo "Frontend build"
                     echo "=========================================="
-                    echo "Git SHA      : ${env.GIT_SHA}"
-                    echo "Docker tag   : ${env.EFFECTIVE_TAG}"
-                    echo "Deploy env   : ${params.DEPLOY_ENV}"
+                    echo "Git SHA        : ${env.GIT_SHA}"
+                    echo "Docker tag     : ${env.EFFECTIVE_TAG}"
+                    echo "Docker deploy  : ${params.DOCKER_DEPLOY}"
                     echo "=========================================="
                 }
             }
@@ -409,25 +370,8 @@ pipeline {
         stage('Docker Build & Push') {
 
             when {
-
-                allOf {
-
-                    expression {
-                        return !params.SKIP_DOCKER
-                    }
-
-                    anyOf {
-
-                        branch 'main'
-
-                        branch 'master'
-
-                        branch 'develop'
-
-                        expression {
-                            return params.DEPLOY_ENV != 'none'
-                        }
-                    }
+                expression {
+                    return !params.SKIP_DOCKER
                 }
             }
 
@@ -473,109 +417,34 @@ pipeline {
         }
 
         // ---------------------------------------------------------------------
-        // Deploy Staging
+        // Deploy (Docker Compose local — pas de SSH)
         // ---------------------------------------------------------------------
 
-        stage('Deploy Staging') {
+        stage('Deploy Docker') {
 
             when {
-
-                expression {
-                    return params.DEPLOY_ENV == 'staging'
+                allOf {
+                    expression { return !params.SKIP_DOCKER }
+                    expression { return params.DOCKER_DEPLOY }
                 }
             }
 
             steps {
 
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: "${SSH_CREDENTIALS}",
-                        keyFileVariable: 'SSH_KEY'
-                    )
-                ]) {
+                sh """
+                    set -e
 
-                    sh """
-                        set -e
+                    echo "=========================================="
+                    echo "Deploy frontend with Docker Compose"
+                    echo "=========================================="
 
-                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
-                            ${DEPLOY_USER}@${STAGING_HOST} '
-                                set -e
+                    export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
 
-                                echo "Deploying frontend..."
+                    echo "Image: \$FRONTEND_IMAGE"
 
-                                cd ${DEPLOY_PATH}
-
-                                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
-
-                                echo "Pulling image:"
-                                echo \$FRONTEND_IMAGE
-
-                                docker compose pull frontend
-
-                                docker compose up -d \\
-                                    --remove-orphans \\
-                                    frontend
-
-                                docker compose ps frontend
-                            '
-                    """
-                }
-            }
-        }
-
-        // ---------------------------------------------------------------------
-        // Deploy Production
-        // ---------------------------------------------------------------------
-
-        stage('Deploy Production') {
-
-            when {
-
-                expression {
-                    return params.DEPLOY_ENV == 'production'
-                }
-            }
-
-            steps {
-
-                input(
-                    message: "Deploy frontend ${EFFECTIVE_TAG} to PRODUCTION?",
-                    ok: 'Deploy'
-                )
-
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: "${SSH_CREDENTIALS}",
-                        keyFileVariable: 'SSH_KEY'
-                    )
-                ]) {
-
-                    sh """
-                        set -e
-
-                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no \\
-                            ${DEPLOY_USER}@${PROD_HOST} '
-                                set -e
-
-                                echo "Deploying frontend..."
-
-                                cd ${DEPLOY_PATH}
-
-                                export FRONTEND_IMAGE=${IMAGE_NAME}:${EFFECTIVE_TAG}
-
-                                echo "Pulling image:"
-                                echo \$FRONTEND_IMAGE
-
-                                docker compose pull frontend
-
-                                docker compose up -d \\
-                                    --remove-orphans \\
-                                    frontend
-
-                                docker compose ps frontend
-                            '
-                    """
-                }
+                    docker compose -f docker-compose.yml up -d --remove-orphans frontend
+                    docker compose -f docker-compose.yml ps frontend
+                """
             }
         }
     }
@@ -593,9 +462,9 @@ pipeline {
             Frontend pipeline SUCCESS
             ==========================================
 
-            Git SHA    : ${env.GIT_SHA}
-            Docker tag : ${env.EFFECTIVE_TAG}
-            Deploy env : ${params.DEPLOY_ENV}
+            Git SHA       : ${env.GIT_SHA}
+            Docker tag    : ${env.EFFECTIVE_TAG}
+            Docker deploy : ${params.DOCKER_DEPLOY}
 
             ==========================================
             """

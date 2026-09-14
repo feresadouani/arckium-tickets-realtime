@@ -1,4 +1,4 @@
-# Déploiement local / staging / prod (images poussées par Jenkins)
+# Déploiement Docker Compose (utilisé par Jenkins sur la VM)
 services:
   mongo:
     image: mongo:7
@@ -9,7 +9,7 @@ services:
       - "27017:27017"
 
   backend:
-    image: ${BACKEND_IMAGE:-arckium/tickets-backend:latest}
+    image: ${BACKEND_IMAGE:-docker.io/feresadouani10/tickets-backend:latest}
     restart: unless-stopped
     depends_on:
       - mongo
@@ -18,12 +18,12 @@ services:
       PORT: 3000
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/tickets}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      FRONTEND_URL: ${FRONTEND_URL:-http://192.168.56.10}
     ports:
       - "3000:3000"
 
   frontend:
-    image: ${FRONTEND_IMAGE:-arckium/tickets-frontend:latest}
+    image: ${FRONTEND_IMAGE:-docker.io/feresadouani10/tickets-frontend:latest}
     restart: unless-stopped
     depends_on:
       - backend
