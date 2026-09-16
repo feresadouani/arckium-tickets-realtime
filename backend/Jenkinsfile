@@ -7,14 +7,15 @@
 //   Script Path = backend/Jenkinsfile
 //
 // Environnement Jenkins:
-//   - Node.js, npm, Docker, Docker Compose sur la VM Jenkins
+//   - Node.js, npm, Docker, Docker Compose, kubectl sur la VM Jenkins
 //   - SonarQube accessible (SONAR_HOST_URL)
+//   - Cluster Kubernetes accessible (kubeconfig sur l agent)
 //
 // Credentials Jenkins:
 //   - docker-registry-creds
 //   - sonar-token (Secret text)
 //
-// Déploiement : Docker Compose local sur l'agent Jenkins (pas de SSH)
+// Déploiement : Docker Compose et/ou Kubernetes (paramètres)
 // =============================================================================
 
 pipeline {
@@ -70,8 +71,14 @@ pipeline {
 
         booleanParam(
             name: 'DOCKER_DEPLOY',
-            defaultValue: true,
+            defaultValue: false,
             description: 'Deployer via docker compose sur la VM Jenkins'
+        )
+
+        booleanParam(
+            name: 'K8S_DEPLOY',
+            defaultValue: true,
+            description: 'Deployer sur Kubernetes (kubectl apply + set image)'
         )
 
         string(
@@ -93,6 +100,8 @@ pipeline {
         DOCKER_CREDENTIALS = 'docker-registry-creds'
 
         PROJECT_DIR = 'backend'
+        K8S_DIR = 'k8s'
+        K8S_NAMESPACE = 'arckium'
 
         SONAR_HOST_URL = 'http://192.168.56.10:9000'
         SONAR_CREDENTIALS = 'sonar-token'
@@ -135,6 +144,10 @@ pipeline {
                     docker compose version
 
                     echo ""
+                    echo "kubectl:"
+                    kubectl version --client --short || kubectl version --client
+
+                    echo ""
                     echo "Jenkins user:"
                     whoami
 
@@ -175,6 +188,7 @@ pipeline {
                     echo "Git SHA        : ${env.GIT_SHA}"
                     echo "Docker tag     : ${env.EFFECTIVE_TAG}"
                     echo "Docker deploy  : ${params.DOCKER_DEPLOY}"
+                    echo "K8s deploy     : ${params.K8S_DEPLOY}"
                     echo "=========================================="
                 }
             }
@@ -450,6 +464,49 @@ pipeline {
                 """
             }
         }
+
+        // =====================================================================
+        // Deploy Kubernetes
+        // =====================================================================
+
+        stage('Deploy Kubernetes') {
+
+            when {
+                allOf {
+                    expression { return !params.SKIP_DOCKER }
+                    expression { return params.K8S_DEPLOY }
+                }
+            }
+
+            steps {
+
+                sh """
+                    set -e
+
+                    echo "=========================================="
+                    echo "Deploy backend on Kubernetes"
+                    echo "=========================================="
+
+                    kubectl apply -f ${K8S_DIR}/namespace.yaml
+                    kubectl apply -f ${K8S_DIR}/backend-configmap.yaml
+                    kubectl apply -f ${K8S_DIR}/backend-secret.yaml
+                    kubectl apply -f ${K8S_DIR}/backend-deployment.yaml
+                    kubectl apply -f ${K8S_DIR}/backend-service.yaml
+
+                    kubectl set image deployment/tickets-backend \\
+                        backend=${IMAGE_NAME}:${EFFECTIVE_TAG} \\
+                        -n ${K8S_NAMESPACE}
+
+                    kubectl rollout status deployment/tickets-backend \\
+                        -n ${K8S_NAMESPACE} \\
+                        --timeout=180s
+
+                    echo ""
+                    echo "Pods / Services backend:"
+                    kubectl get pods,svc -n ${K8S_NAMESPACE} -l app=tickets-backend
+                """
+            }
+        }
     }
 
     // =========================================================================
@@ -468,6 +525,7 @@ pipeline {
             Git SHA       : ${env.GIT_SHA}
             Docker tag    : ${env.EFFECTIVE_TAG}
             Docker deploy : ${params.DOCKER_DEPLOY}
+            K8s deploy    : ${params.K8S_DEPLOY}
 
             ==========================================
             """

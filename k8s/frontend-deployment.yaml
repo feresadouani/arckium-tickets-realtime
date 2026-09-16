@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tickets-frontend
+  namespace: arckium
+  labels:
+    app: tickets-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tickets-frontend
+  template:
+    metadata:
+      labels:
+        app: tickets-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: docker.io/feresadouani10/tickets-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

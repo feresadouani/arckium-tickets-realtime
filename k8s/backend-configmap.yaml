@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: arckium
+  labels:
+    app: tickets-backend
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  # Service DNS interne — adapter si MongoDB est hors cluster
+  MONGODB_URI: "mongodb://mongo:27017/tickets"
+  FRONTEND_URL: "http://192.168.56.10:30080"
+  JWT_EXPIRESIN: "1d"
