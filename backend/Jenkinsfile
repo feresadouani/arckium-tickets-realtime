@@ -82,6 +82,12 @@ pipeline {
         )
 
         string(
+            name: 'KUBECONFIG_PATH',
+            defaultValue: '/var/lib/jenkins/.kube/config',
+            description: 'Chemin kubeconfig (API K8s, PAS Jenkins)'
+        )
+
+        string(
             name: 'IMAGE_TAG',
             defaultValue: '',
             description: 'Tag Docker personnalisé. Vide = BUILD_NUMBER + Git SHA'
@@ -102,6 +108,7 @@ pipeline {
         PROJECT_DIR = 'backend'
         K8S_DIR = 'k8s'
         K8S_NAMESPACE = 'arckium'
+        KUBECONFIG = "${params.KUBECONFIG_PATH}"
 
         SONAR_HOST_URL = 'http://192.168.56.10:9000'
         SONAR_CREDENTIALS = 'sonar-token'
@@ -487,11 +494,40 @@ pipeline {
                     echo "Deploy backend on Kubernetes"
                     echo "=========================================="
 
-                    kubectl apply -f ${K8S_DIR}/namespace.yaml
-                    kubectl apply -f ${K8S_DIR}/backend-configmap.yaml
-                    kubectl apply -f ${K8S_DIR}/backend-secret.yaml
-                    kubectl apply -f ${K8S_DIR}/backend-deployment.yaml
-                    kubectl apply -f ${K8S_DIR}/backend-service.yaml
+                    export KUBECONFIG="${params.KUBECONFIG_PATH}"
+                    unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy || true
+                    unset KUBERNETES_SERVICE_HOST KUBERNETES_SERVICE_PORT || true
+
+                    echo "KUBECONFIG=\$KUBECONFIG"
+                    if [ ! -f "\$KUBECONFIG" ]; then
+                        echo "ERROR: kubeconfig introuvable: \$KUBECONFIG"
+                        echo "Copie le config cluster pour l utilisateur jenkins, ex:"
+                        echo "  sudo mkdir -p /var/lib/jenkins/.kube"
+                        echo "  sudo cp /home/vagrant/.kube/config /var/lib/jenkins/.kube/config"
+                        echo "  sudo chown -R jenkins:jenkins /var/lib/jenkins/.kube"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Contexte Kubernetes:"
+                    kubectl config current-context
+                    kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+                    echo ""
+
+                    echo ""
+                    echo "Test acces cluster:"
+                    if ! kubectl get namespace default >/dev/null 2>&1; then
+                        echo "ERROR: kubectl n atteint pas le cluster Kubernetes."
+                        echo "Le serveur dans kubeconfig ne doit PAS etre l URL Jenkins."
+                        kubectl cluster-info || true
+                        exit 1
+                    fi
+
+                    kubectl apply --validate=false -f ${K8S_DIR}/namespace.yaml
+                    kubectl apply --validate=false -f ${K8S_DIR}/backend-configmap.yaml
+                    kubectl apply --validate=false -f ${K8S_DIR}/backend-secret.yaml
+                    kubectl apply --validate=false -f ${K8S_DIR}/backend-deployment.yaml
+                    kubectl apply --validate=false -f ${K8S_DIR}/backend-service.yaml
 
                     kubectl set image deployment/tickets-backend \\
                         backend=${IMAGE_NAME}:${EFFECTIVE_TAG} \\
